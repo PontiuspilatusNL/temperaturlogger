@@ -241,7 +241,7 @@ export default function Home() {
       </Head>
 
       <Script 
-        src="https://cdn.jsdelivr.net/npm/chart.js" 
+        src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js" 
         onLoad={() => {
           setChartLoaded(true);
           setDebug('✅ Chart.js Script geladen!');
