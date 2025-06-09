@@ -1,15 +1,12 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
-import Script from 'next/script';
 
 export default function Home() {
   const [latestData, setLatestData] = useState(null);
   const [historicalData, setHistoricalData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [chartLoaded, setChartLoaded] = useState(false);
-  const chartRef = useRef(null);
-  const chartInstance = useRef(null);
+  const [debug, setDebug] = useState('Initialisiere...');
 
   // Supabase configuration
   const SUPABASE_URL = 'https://xdbufqslbajqzdtkbfar.supabase.co';
@@ -17,197 +14,131 @@ export default function Home() {
 
   const SENSOR_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
 
-  const fetchLatestData = async () => {
+  const fetchData = async () => {
     try {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/sensor_data?select=*&order=created_at.desc&limit=1`, {
+      setDebug('Lade Daten von Supabase...');
+      setLoading(true);
+      
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/sensor_data?select=*&order=created_at.desc&limit=10`, {
         headers: {
           'apikey': SUPABASE_ANON_KEY,
           'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
         }
       });
       
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
       
       const data = await response.json();
-      return data[0] || null;
-    } catch (error) {
-      console.error('Error fetching latest data:', error);
-      throw error;
-    }
-  };
-
-  const fetchHistoricalData = async () => {
-    try {
-      const twentyFourHoursAgo = new Date();
-      twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
-      
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/sensor_data?select=*&created_at=gte.${twentyFourHoursAgo.toISOString()}&order=created_at.asc`, {
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-        }
-      });
-      
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching historical data:', error);
-      throw error;
-    }
-  };
-
-  const createChart = (data) => {
-    if (!chartLoaded || !window.Chart || !chartRef.current) return;
-
-    // Destroy existing chart
-    if (chartInstance.current) {
-      chartInstance.current.destroy();
-    }
-
-    const ctx = chartRef.current.getContext('2d');
-    
-    // Prepare data for chart
-    const labels = data.map(item => {
-      const date = new Date(item.created_at);
-      return date.toLocaleTimeString('de-DE', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-    });
-
-    const datasets = [];
-    for (let i = 1; i <= 5; i++) {
-      datasets.push({
-        label: `Sensor ${i}`,
-        data: data.map(item => item[`t${i}`]),
-        borderColor: SENSOR_COLORS[i-1],
-        backgroundColor: SENSOR_COLORS[i-1] + '20',
-        tension: 0.4,
-        pointRadius: 3,
-        pointHoverRadius: 6,
-        pointBackgroundColor: SENSOR_COLORS[i-1],
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        fill: false
-      });
-    }
-
-    chartInstance.current = new window.Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: datasets
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {
-          intersect: false,
-          mode: 'index'
-        },
-        plugins: {
-          legend: {
-            labels: {
-              color: 'white',
-              font: {
-                size: 14
-              },
-              usePointStyle: true
-            }
-          },
-          tooltip: {
-            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-            titleColor: 'white',
-            bodyColor: 'white',
-            borderColor: 'rgba(255, 255, 255, 0.2)',
-            borderWidth: 1
-          }
-        },
-        scales: {
-          x: {
-            ticks: {
-              color: 'rgba(255, 255, 255, 0.8)',
-              maxTicksLimit: 12
-            },
-            grid: {
-              color: 'rgba(255, 255, 255, 0.1)'
-            }
-          },
-          y: {
-            ticks: {
-              color: 'rgba(255, 255, 255, 0.8)'
-            },
-            grid: {
-              color: 'rgba(255, 255, 255, 0.1)'
-            },
-            title: {
-              display: true,
-              text: 'Temperatur (°C)',
-              color: 'white',
-              font: {
-                size: 14
-              }
-            }
-          }
-        }
-      }
-    });
-  };
-
-  const loadDashboard = async () => {
-    try {
-      setLoading(true);
-      const [latest, historical] = await Promise.all([
-        fetchLatestData(),
-        fetchHistoricalData()
-      ]);
-      
-      setLatestData(latest);
-      setHistoricalData(historical);
+      setLatestData(data[0] || null);
+      setHistoricalData(data);
+      setDebug(`✅ ${data.length} Datensätze geladen`);
       setError(false);
-      
-      // Create chart if Chart.js is loaded
-      if (chartLoaded && historical.length > 0) {
-        setTimeout(() => createChart(historical), 100);
-      }
-    } catch (error) {
-      console.error('Error loading dashboard:', error);
+    } catch (err) {
+      setDebug(`❌ Fehler: ${err.message}`);
       setError(true);
+      console.error('Fetch error:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadDashboard();
-    const interval = setInterval(loadDashboard, 30000);
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, [chartLoaded]);
+  }, []);
 
+  // Einfache Canvas-Chart (ohne Chart.js)
   useEffect(() => {
-    // Create chart when both chart is loaded and we have data
-    if (chartLoaded && historicalData.length > 0) {
-      createChart(historicalData);
+    if (historicalData.length > 0) {
+      drawSimpleChart();
     }
-  }, [chartLoaded, historicalData]);
+  }, [historicalData]);
 
-  if (loading) {
+  const drawSimpleChart = () => {
+    const canvas = document.getElementById('simpleChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width = canvas.offsetWidth;
+    const height = canvas.height = 300;
+    
+    // Clear canvas
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fillRect(0, 0, width, height);
+    
+    if (historicalData.length === 0) {
+      ctx.fillStyle = 'white';
+      ctx.font = '20px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Keine Daten verfügbar', width/2, height/2);
+      return;
+    }
+    
+    // Draw simple lines for each sensor
+    const margin = 40;
+    const chartWidth = width - 2 * margin;
+    const chartHeight = height - 2 * margin;
+    
+    // Find min/max for scaling
+    let minTemp = Infinity, maxTemp = -Infinity;
+    historicalData.forEach(item => {
+      for (let i = 1; i <= 5; i++) {
+        const temp = item[`t${i}`];
+        if (temp !== null && temp !== undefined) {
+          minTemp = Math.min(minTemp, temp);
+          maxTemp = Math.max(maxTemp, temp);
+        }
+      }
+    });
+    
+    if (minTemp === Infinity) return;
+    
+    const tempRange = maxTemp - minTemp || 1;
+    
+    // Draw each sensor line
+    for (let sensor = 1; sensor <= 5; sensor++) {
+      ctx.strokeStyle = SENSOR_COLORS[sensor - 1];
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      
+      let firstPoint = true;
+      historicalData.forEach((item, index) => {
+        const temp = item[`t${sensor}`];
+        if (temp !== null && temp !== undefined) {
+          const x = margin + (index / (historicalData.length - 1)) * chartWidth;
+          const y = margin + chartHeight - ((temp - minTemp) / tempRange) * chartHeight;
+          
+          if (firstPoint) {
+            ctx.moveTo(x, y);
+            firstPoint = false;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+      });
+      
+      ctx.stroke();
+    }
+    
+    // Draw labels
+    ctx.fillStyle = 'white';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Min: ${minTemp.toFixed(1)}°C`, 10, height - 10);
+    ctx.textAlign = 'right';
+    ctx.fillText(`Max: ${maxTemp.toFixed(1)}°C`, width - 10, height - 10);
+    
+    setDebug(`✅ Chart gezeichnet (${historicalData.length} Punkte)`);
+  };
+
+  if (loading && !latestData) {
     return (
       <div style={styles.container}>
         <div style={styles.loading}>
-          🌡️ Lade Temperaturdaten...
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={styles.container}>
-        <div style={styles.error}>
-          <strong>Fehler beim Laden der Daten</strong><br/>
-          Bitte prüfe die Supabase-Verbindung
+          🌡️ {debug}
         </div>
       </div>
     );
@@ -216,22 +147,20 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>Temperatur Logger - Live Dashboard</title>
-        <meta name="description" content="Live Temperatur Dashboard" />
+        <title>Temperatur Logger - Simple Dashboard</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-
-      <Script 
-        src="https://cdn.jsdelivr.net/npm/chart.js"
-        onLoad={() => setChartLoaded(true)}
-      />
 
       <div style={styles.container}>
         <div style={styles.header}>
           <h1 style={styles.title}>🌡️ Temperatur Logger</h1>
-          <div style={styles.status}>
+          <div style={{
+            ...styles.status,
+            background: error ? 'rgba(244,67,54,0.2)' : 'rgba(76,175,80,0.2)',
+            borderColor: error ? '#f44336' : '#4CAF50'
+          }}>
             <div style={styles.statusDot}></div>
-            <span>Live Daten • Aktualisiert alle 30 Sekunden</span>
+            <span>{debug}</span>
           </div>
         </div>
 
@@ -252,113 +181,13 @@ export default function Home() {
 
         <div style={styles.chartContainer}>
           <div style={styles.chartTitle}>
-            📊 Temperaturverlauf (letzte 24 Stunden)
+            📊 Temperaturverlauf (Simple Canvas Chart)
           </div>
-          <div style={styles.chartWrapper}>
-            {chartLoaded && historicalData.length > 0 ? (
-              <canvas ref={chartRef} style={styles.canvas}></canvas>
-            ) : (
-              <div style={styles.chartPlaceholder}>
-                {!chartLoaded ? (
-                  <p>📈 Lade Chart.js...</p>
-                ) : historicalData.length === 0 ? (
-                  <p>📊 Keine Daten für Chart verfügbar</p>
-                ) : (
-                  <p>🔄 Erstelle Chart...</p>
-                )}
-              </div>
-            )}
-          </div>
-          
+          <canvas id="simpleChart" style={styles.canvas}></canvas>
           {latestData && (
             <div style={styles.chartInfo}>
               <p>🕒 Letztes Update: {new Date(latestData.created_at).toLocaleString('de-DE')}</p>
-              <p>📈 {historicalData.length} Datenpunkte (24h)</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
-
-  if (loading) {
-    return (
-      <div style={styles.container}>
-        <div style={styles.loading}>
-          🌡️ Lade Temperaturdaten...
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={styles.container}>
-        <div style={styles.error}>
-          <strong>Fehler beim Laden der Daten</strong><br/>
-          Bitte prüfe die Supabase-Verbindung
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <Head>
-        <title>Temperatur Logger - Live Dashboard</title>
-        <meta name="description" content="Live Temperatur Dashboard" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </Head>
-
-      <div style={styles.container}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>🌡️ Temperatur Logger</h1>
-          <div style={styles.status}>
-            <div style={styles.statusDot}></div>
-            <span>Live Daten • Aktualisiert alle 30 Sekunden</span>
-          </div>
-        </div>
-
-        <div style={styles.tempGrid}>
-          {[1, 2, 3, 4, 5].map(i => {
-            const temp = latestData?.[`t${i}`];
-            return (
-              <div key={i} style={{...styles.tempCard, borderLeft: `4px solid ${SENSOR_COLORS[i-1]}`}}>
-                <div style={styles.sensorName}>Sensor {i}</div>
-                <div style={{...styles.tempValue, color: SENSOR_COLORS[i-1]}}>
-                  {temp !== null && temp !== undefined ? temp.toFixed(1) : '--'}
-                </div>
-                <div style={styles.tempUnit}>°C</div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={styles.chartContainer}>
-          <div style={styles.chartTitle}>
-            📊 Temperaturverlauf (letzte 24 Stunden)
-          </div>
-          <div style={styles.chartWrapper}>
-            {chartLoaded && historicalData.length > 0 ? (
-              <canvas ref={chartRef} style={styles.canvas}></canvas>
-            ) : (
-              <div style={styles.chartPlaceholder}>
-                {!chartLoaded ? (
-                  <p>📈 Lade Chart.js...</p>
-                ) : historicalData.length === 0 ? (
-                  <p>📊 Keine Daten für Chart verfügbar</p>
-                ) : (
-                  <p>🔄 Erstelle Chart...</p>
-                )}
-              </div>
-            )}
-          </div>
-          
-          {latestData && (
-            <div style={styles.chartInfo}>
-              <p>🕒 Letztes Update: {new Date(latestData.created_at).toLocaleString('de-DE')}</p>
-              <p>📈 {historicalData.length} Datenpunkte (24h)</p>
+              <p>📈 {historicalData.length} Datenpunkte</p>
             </div>
           )}
         </div>
@@ -391,7 +220,10 @@ const styles = {
     justifyContent: 'center',
     alignItems: 'center',
     gap: '10px',
-    marginBottom: '20px'
+    marginBottom: '20px',
+    padding: '10px',
+    borderRadius: '10px',
+    border: '1px solid'
   },
   statusDot: {
     width: '12px',
@@ -412,8 +244,7 @@ const styles = {
     padding: '20px',
     textAlign: 'center',
     backdropFilter: 'blur(10px)',
-    border: '1px solid rgba(255, 255, 255, 0.2)',
-    transition: 'transform 0.3s ease'
+    border: '1px solid rgba(255, 255, 255, 0.2)'
   },
   sensorName: {
     fontSize: '1.1rem',
@@ -441,21 +272,11 @@ const styles = {
     marginBottom: '20px',
     fontSize: '1.5rem'
   },
-  chartWrapper: {
-    height: '400px',
-    position: 'relative'
-  },
   canvas: {
     width: '100%',
-    height: '100%'
-  },
-  chartPlaceholder: {
-    textAlign: 'center',
-    padding: '20px',
-    height: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
+    height: '300px',
+    background: 'rgba(255,255,255,0.05)',
+    borderRadius: '10px'
   },
   chartInfo: {
     textAlign: 'center',
@@ -467,13 +288,5 @@ const styles = {
     textAlign: 'center',
     padding: '40px',
     fontSize: '1.5rem'
-  },
-  error: {
-    background: 'rgba(244, 67, 54, 0.2)',
-    border: '1px solid rgba(244, 67, 54, 0.5)',
-    borderRadius: '10px',
-    padding: '15px',
-    margin: '20px 0',
-    textAlign: 'center'
   }
 };
