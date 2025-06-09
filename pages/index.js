@@ -1,158 +1,88 @@
-// pages/index.js
-import { useState, useEffect } from 'react';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  TimeScale,
-} from 'chart.js';
-import { Line } from 'react-chartjs-2';
-import 'chartjs-adapter-date-fns';
-import { format } from 'date-fns';
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  TimeScale
-);
+import { useEffect, useState } from 'react';
+import Head from 'next/head';
 
 export default function Home() {
-  const [sensorData, setSensorData] = useState(null);
+  const [latestData, setLatestData] = useState(null);
+  const [historicalData, setHistoricalData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [lastUpdate, setLastUpdate] = useState(null);
+  const [error, setError] = useState(false);
 
-  const fetchData = async () => {
+  // Supabase configuration
+  const SUPABASE_URL = 'https://xdbufqslbajqzdtkbfar.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhkYnVmcXNsYmFqcXpkdGtiZmFyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk0MDkyMDMsImV4cCI6MjA2NDk4NTIwM30.3xEyfp3gXnWA2VAs1FGv8BrvaV8XdxepPEIHF4BSNEw';
+
+  const SENSOR_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
+
+  const fetchLatestData = async () => {
     try {
-      const response = await fetch('/api/sensors');
-      const data = await response.json();
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/sensor_data?select=*&order=created_at.desc&limit=1`, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
       
-      if (data.success) {
-        setSensorData(data);
-        setLastUpdate(new Date());
-        setError(null);
-      } else {
-        setError(data.error);
-      }
-      setLoading(false);
-    } catch (err) {
-      setError('Failed to fetch data: ' + err.message);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      
+      const data = await response.json();
+      return data[0] || null;
+    } catch (error) {
+      console.error('Error fetching latest data:', error);
+      throw error;
+    }
+  };
+
+  const fetchHistoricalData = async () => {
+    try {
+      const twentyFourHoursAgo = new Date();
+      twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+      
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/sensor_data?select=*&created_at=gte.${twentyFourHoursAgo.toISOString()}&order=created_at.asc`, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+      
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching historical data:', error);
+      throw error;
+    }
+  };
+
+  const loadDashboard = async () => {
+    try {
+      setLoading(true);
+      const [latest, historical] = await Promise.all([
+        fetchLatestData(),
+        fetchHistoricalData()
+      ]);
+      
+      setLatestData(latest);
+      setHistoricalData(historical);
+      setError(false);
+    } catch (error) {
+      console.error('Error loading dashboard:', error);
+      setError(true);
+    } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000); // Update every 30 seconds
+    loadDashboard();
+    const interval = setInterval(loadDashboard, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  const getCurrentTemp = (sensorKey) => {
-    if (!sensorData?.latest) return '--';
-    const temp = sensorData.latest[sensorKey.toLowerCase()];
-    return temp !== null && temp !== undefined ? `${temp.toFixed(1)}°C` : '--';
-  };
-
-  const getSignalIcon = () => {
-    if (!sensorData?.latest?.signal_strength) return '📶';
-    const signal = sensorData.latest.signal_strength;
-    if (signal > 20) return '📶';
-    if (signal > 10) return '📶';
-    if (signal > 5) return '📶';
-    return '📶';
-  };
-
-  const getChartData = () => {
-    if (!sensorData?.historical) return null;
-
-    const sensorColors = [
-      'rgb(255, 99, 132)',   // T1 - Red
-      'rgb(54, 162, 235)',   // T2 - Blue  
-      'rgb(255, 205, 86)',   // T3 - Yellow
-      'rgb(75, 192, 192)',   // T4 - Teal
-      'rgb(153, 102, 255)',  // T5 - Purple
-    ];
-
-    const datasets = [];
-    
-    for (let i = 1; i <= 5; i++) {
-      const sensorKey = `t${i}`;
-      const dataPoints = sensorData.historical
-        .filter(row => row[sensorKey] !== null && row[sensorKey] !== undefined)
-        .map(row => ({
-          x: new Date(row.timestamp),
-          y: parseFloat(row[sensorKey])
-        }));
-
-      if (dataPoints.length > 0) {
-        datasets.push({
-          label: `Sensor ${i}`,
-          data: dataPoints,
-          borderColor: sensorColors[i-1],
-          backgroundColor: sensorColors[i-1] + '33',
-          tension: 0.1,
-          pointRadius: 2,
-          pointHoverRadius: 5,
-        });
-      }
-    }
-
-    return { datasets };
-  };
-
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top',
-      },
-      title: {
-        display: true,
-        text: 'Temperature History (24 Hours)',
-      },
-    },
-    scales: {
-      x: {
-        type: 'time',
-        time: {
-          unit: 'hour',
-          displayFormats: {
-            hour: 'HH:mm'
-          }
-        },
-        title: {
-          display: true,
-          text: 'Time'
-        }
-      },
-      y: {
-        title: {
-          display: true,
-          text: 'Temperature (°C)'
-        },
-        min: 0,
-        max: 100
-      }
-    }
-  };
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-xl text-gray-600">Loading temperature data...</p>
+      <div style={styles.container}>
+        <div style={styles.loading}>
+          🌡️ Lade Temperaturdaten...
         </div>
       </div>
     );
@@ -160,107 +90,179 @@ export default function Home() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 to-red-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-6xl mb-4">⚠️</div>
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Error</h1>
-          <p className="text-red-500 mb-4">{error}</p>
-          <button 
-            onClick={fetchData}
-            className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition-colors"
-          >
-            Try Again
-          </button>
+      <div style={styles.container}>
+        <div style={styles.error}>
+          <strong>Fehler beim Laden der Daten</strong><br/>
+          Bitte prüfe die Supabase-Verbindung
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100">
-      {/* Header */}
-      <header className="bg-white shadow-lg">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex justify-between items-center">
-            <h1 className="text-3xl font-bold text-gray-800">🌡️ TemperaturLogger</h1>
-            <div className="flex items-center space-x-4">
-              <span className="text-2xl">{getSignalIcon()}</span>
-              <div className="text-right">
-                <p className="text-sm text-gray-500">Last Update</p>
-                <p className="text-sm font-mono">
-                  {lastUpdate ? format(lastUpdate, 'HH:mm:ss') : '--:--:--'}
-                </p>
-              </div>
-            </div>
+    <>
+      <Head>
+        <title>Temperatur Logger - Live Dashboard</title>
+        <meta name="description" content="Live Temperatur Dashboard" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </Head>
+
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <h1 style={styles.title}>🌡️ Temperatur Logger</h1>
+          <div style={styles.status}>
+            <div style={styles.statusDot}></div>
+            <span>Live Daten • Aktualisiert alle 30 Sekunden</span>
           </div>
         </div>
-      </header>
 
-      <div className="container mx-auto px-6 py-8">
-        {/* Current Temperature Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
-          {[1, 2, 3, 4, 5].map((sensorNum) => (
-            <div 
-              key={sensorNum} 
-              className="bg-white rounded-xl shadow-lg p-6 text-center hover:shadow-xl transition-shadow"
-            >
-              <h3 className="text-lg font-semibold text-gray-600 mb-2">
-                Sensor {sensorNum}
-              </h3>
-              <div className="text-3xl font-bold text-blue-600 mb-2">
-                {getCurrentTemp(`t${sensorNum}`)}
+        <div style={styles.tempGrid}>
+          {[1, 2, 3, 4, 5].map(i => {
+            const temp = latestData?.[`t${i}`];
+            return (
+              <div key={i} style={{...styles.tempCard, borderLeft: `4px solid ${SENSOR_COLORS[i-1]}`}}>
+                <div style={styles.sensorName}>Sensor {i}</div>
+                <div style={{...styles.tempValue, color: SENSOR_COLORS[i-1]}}>
+                  {temp !== null && temp !== undefined ? temp.toFixed(1) : '--'}
+                </div>
+                <div style={styles.tempUnit}>°C</div>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-500"
-                  style={{ 
-                    width: `${Math.min(100, (parseFloat(getCurrentTemp(`t${sensorNum}`)) || 0) * 2)}%` 
-                  }}
-                ></div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* Chart */}
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="h-96">
-            {getChartData() ? (
-              <Line data={getChartData()} options={chartOptions} />
-            ) : (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-gray-500 text-lg">No historical data available</p>
+        <div style={styles.chartContainer}>
+          <div style={styles.chartTitle}>
+            📊 Temperaturverlauf (letzte 24 Stunden)
+          </div>
+          <div style={styles.chartPlaceholder}>
+            {historicalData.length > 0 ? (
+              <div>
+                <p>📈 {historicalData.length} Datenpunkte geladen</p>
+                <p>🕒 Letztes Update: {latestData?.created_at ? new Date(latestData.created_at).toLocaleString('de-DE') : 'Unbekannt'}</p>
+                <div style={styles.dataPreview}>
+                  {historicalData.slice(-5).map((item, idx) => (
+                    <div key={idx} style={styles.dataRow}>
+                      <span>{new Date(item.created_at).toLocaleTimeString('de-DE')}</span>
+                      {[1,2,3,4,5].map(i => (
+                        <span key={i} style={{color: SENSOR_COLORS[i-1]}}>
+                          T{i}: {item[`t${i}`]?.toFixed(1) || '--'}°C
+                        </span>
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
+            ) : (
+              <p>Keine historischen Daten verfügbar</p>
             )}
           </div>
         </div>
-
-        {/* Device Info */}
-        {sensorData?.latest && (
-          <div className="mt-8 bg-white rounded-xl shadow-lg p-6">
-            <h3 className="text-xl font-semibold mb-4">Device Information</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <p className="text-gray-500">Device ID</p>
-                <p className="font-mono">{sensorData.latest.device_id}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Signal Strength</p>
-                <p className="font-mono">{sensorData.latest.signal_strength || 'N/A'}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Last Reading</p>
-                <p className="font-mono">
-                  {sensorData.latest.timestamp ? 
-                    format(new Date(sensorData.latest.timestamp), 'dd.MM.yyyy HH:mm:ss') : 
-                    'N/A'
-                  }
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
-    </div>
+    </>
   );
 }
+
+const styles = {
+  container: {
+    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+    background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)',
+    color: 'white',
+    minHeight: '100vh',
+    maxWidth: '1200px',
+    margin: '0 auto',
+    padding: '20px'
+  },
+  header: {
+    textAlign: 'center',
+    marginBottom: '30px'
+  },
+  title: {
+    fontSize: '2.5rem',
+    marginBottom: '10px',
+    textShadow: '2px 2px 4px rgba(0,0,0,0.3)'
+  },
+  status: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '10px',
+    marginBottom: '20px'
+  },
+  statusDot: {
+    width: '12px',
+    height: '12px',
+    background: '#4CAF50',
+    borderRadius: '50%',
+    animation: 'pulse 2s infinite'
+  },
+  tempGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '20px',
+    marginBottom: '30px'
+  },
+  tempCard: {
+    background: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: '15px',
+    padding: '20px',
+    textAlign: 'center',
+    backdropFilter: 'blur(10px)',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    transition: 'transform 0.3s ease'
+  },
+  sensorName: {
+    fontSize: '1.1rem',
+    marginBottom: '10px',
+    opacity: '0.8'
+  },
+  tempValue: {
+    fontSize: '2.5rem',
+    fontWeight: 'bold',
+    marginBottom: '5px'
+  },
+  tempUnit: {
+    fontSize: '1.2rem',
+    opacity: '0.7'
+  },
+  chartContainer: {
+    background: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: '15px',
+    padding: '20px',
+    backdropFilter: 'blur(10px)',
+    border: '1px solid rgba(255, 255, 255, 0.2)'
+  },
+  chartTitle: {
+    textAlign: 'center',
+    marginBottom: '20px',
+    fontSize: '1.5rem'
+  },
+  chartPlaceholder: {
+    textAlign: 'center',
+    padding: '20px'
+  },
+  dataPreview: {
+    marginTop: '20px',
+    textAlign: 'left'
+  },
+  dataRow: {
+    display: 'flex',
+    gap: '15px',
+    marginBottom: '8px',
+    fontSize: '0.9rem',
+    flexWrap: 'wrap'
+  },
+  loading: {
+    textAlign: 'center',
+    padding: '40px',
+    fontSize: '1.5rem'
+  },
+  error: {
+    background: 'rgba(244, 67, 54, 0.2)',
+    border: '1px solid rgba(244, 67, 54, 0.5)',
+    borderRadius: '10px',
+    padding: '15px',
+    margin: '20px 0',
+    textAlign: 'center'
+  }
+};
