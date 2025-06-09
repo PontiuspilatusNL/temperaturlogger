@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chart Test - Temperatur Logger</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .status {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid #4CAF50;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .temp-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .temp-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .sensor-name {
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+            opacity: 0.8;
+        }
+        .temp-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .temp-unit {
+            font-size: 1.2rem;
+            opacity: 0.7;
+        }
+        .chart-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 20px;
+        }
+        .chart-wrapper {
+            height: 400px;
+            position: relative;
+        }
+        .error {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid rgba(244, 67, 54, 0.5);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌡️ Temperatur Logger - CHART TEST</h1>
+        </div>
+        
+        <div id="status" class="status">
+            <strong>CHART TEST</strong><br>
+            <span id="statusText">Initialisiere...</span>
+        </div>
+        
+        <div id="tempCards" class="temp-grid">
+            <!-- Will be populated by JavaScript -->
+        </div>
+        
+        <div class="chart-container">
+            <h2 style="text-align: center; margin-bottom: 20px;">📊 Live Chart Test</h2>
+            <div class="chart-wrapper">
+                <canvas id="temperatureChart"></canvas>
+            </div>
+        </div>
+        
+        <div id="error" class="error" style="display: none;">
+            Fehler beim Laden der Daten
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const SUPABASE_URL = 'https://xdbufqslbajqzdtkbfar.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhkYnVmcXNsYmFqcXpkdGtiZmFyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk0MDkyMDMsImV4cCI6MjA2NDk4NTIwM30.3xEyfp3gXnWA2VAs1FGv8BrvaV8XdxepPEIHF4BSNEw';
+        const SENSOR_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
+        
+        let chart = null;
+        
+        function updateStatus(text, isError = false) {
+            const statusElement = document.getElementById('statusText');
+            statusElement.textContent = text;
+            if (isError) {
+                document.getElementById('status').style.background = 'rgba(244, 67, 54, 0.2)';
+                document.getElementById('status').style.borderColor = '#f44336';
+            }
+        }
+        
+        async function fetchLatestData() {
+            try {
+                updateStatus('Lade aktuelle Daten...');
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/sensor_data?select=*&order=created_at.desc&limit=1`, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                updateStatus(`✅ Aktuelle Daten geladen: ${data.length} Einträge`);
+                return data[0] || null;
+            } catch (error) {
+                updateStatus(`❌ Fehler beim Laden: ${error.message}`, true);
+                throw error;
+            }
+        }
+        
+        async function fetchHistoricalData() {
+            try {
+                updateStatus('Lade historische Daten...');
+                const twentyFourHoursAgo = new Date();
+                twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+                
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/sensor_data?select=*&created_at=gte.${twentyFourHoursAgo.toISOString()}&order=created_at.asc`, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                updateStatus(`✅ Historische Daten geladen: ${data.length} Einträge`);
+                return data;
+            } catch (error) {
+                updateStatus(`❌ Fehler beim Laden: ${error.message}`, true);
+                throw error;
+            }
+        }
+        
+        function updateTemperatureCards(data) {
+            const container = document.getElementById('tempCards');
+            container.innerHTML = '';
+            
+            if (!data) {
+                container.innerHTML = '<div style="grid-column: 1/-1; text-align: center;">Keine aktuellen Daten</div>';
+                return;
+            }
+            
+            for (let i = 1; i <= 5; i++) {
+                const temp = data[`t${i}`];
+                const card = document.createElement('div');
+                card.className = 'temp-card';
+                card.style.borderLeft = `4px solid ${SENSOR_COLORS[i-1]}`;
+                
+                card.innerHTML = `
+                    <div class="sensor-name">Sensor ${i}</div>
+                    <div class="temp-value" style="color: ${SENSOR_COLORS[i-1]}">
+                        ${temp !== null && temp !== undefined ? temp.toFixed(1) : '--'}
+                    </div>
+                    <div class="temp-unit">°C</div>
+                `;
+                
+                container.appendChild(card);
+            }
+        }
+        
+        function createChart(historicalData) {
+            const ctx = document.getElementById('temperatureChart').getContext('2d');
+            
+            if (chart) {
+                chart.destroy();
+            }
+            
+            if (!historicalData || historicalData.length === 0) {
+                ctx.fillStyle = 'white';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Keine Daten für Chart verfügbar', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
+            
+            const labels = historicalData.map(item => {
+                const date = new Date(item.created_at);
+                return date.toLocaleTimeString('de-DE', { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+            });
+            
+            const datasets = [];
+            for (let i = 1; i <= 5; i++) {
+                datasets.push({
+                    label: `Sensor ${i}`,
+                    data: historicalData.map(item => item[`t${i}`]),
+                    borderColor: SENSOR_COLORS[i-1],
+                    backgroundColor: SENSOR_COLORS[i-1] + '20',
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
+                    fill: false
+                });
+            }
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: 'white'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                color: 'white',
+                                maxTicksLimit: 12
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            }
+                        },
+                        y: {
+                            ticks: {
+                                color: 'white'
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Temperatur (°C)',
+                                color: 'white'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            updateStatus(`✅ Chart erstellt mit ${historicalData.length} Datenpunkten`);
+        }
+        
+        async function initDashboard() {
+            try {
+                updateStatus('Chart.js Version: ' + Chart.version);
+                
+                const [latestData, historicalData] = await Promise.all([
+                    fetchLatestData(),
+                    fetchHistoricalData()
+                ]);
+                
+                updateTemperatureCards(latestData);
+                createChart(historicalData);
+                
+                updateStatus(`✅ Dashboard geladen! Letztes Update: ${latestData ? new Date(latestData.created_at).toLocaleString('de-DE') : 'Unbekannt'}`);
+                
+            } catch (error) {
+                console.error('Dashboard error:', error);
+                updateStatus(`❌ Fehler: ${error.message}`, true);
+                document.getElementById('error').style.display = 'block';
+            }
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            updateStatus('Warte auf Chart.js...');
+            
+            // Check if Chart.js is loaded
+            if (typeof Chart !== 'undefined') {
+                initDashboard();
+            } else {
+                // Wait a bit for Chart.js to load
+                setTimeout(() => {
+                    if (typeof Chart !== 'undefined') {
+                        initDashboard();
+                    } else {
+                        updateStatus('❌ Chart.js konnte nicht geladen werden', true);
+                    }
+                }, 2000);
+            }
+        });
+        
+        // Auto-refresh every 30 seconds
+        setInterval(initDashboard, 30000);
+    </script>
+</body>
+</html>
