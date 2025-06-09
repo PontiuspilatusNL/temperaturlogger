@@ -153,7 +153,7 @@ export default function Home() {
 
       <div style={styles.container}>
         <div style={styles.header}>
-          <h1 style={styles.title}>🌡️ Temperatur Logger</h1>
+          <h1 style={styles.title}>🎨 CHART.JS VERSION 🎨</h1>
           <div style={{
             ...styles.status,
             background: error ? 'rgba(244,67,54,0.2)' : 'rgba(76,175,80,0.2)',
