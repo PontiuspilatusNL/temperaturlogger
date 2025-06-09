@@ -1,4 +1,4 @@
-// FORCE DEPLOYMENT v4.0 - Chart.js Professional Version
+// Chart.js Professional Version - v3.0 FIXED
 import { useEffect, useState, useRef } from 'react';
 import Head from 'next/head';
 import Script from 'next/script';
