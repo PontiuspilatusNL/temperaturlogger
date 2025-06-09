@@ -1,3 +1,4 @@
+// Chart.js Professional Version - v2.0
 import { useEffect, useState } from 'react';
 import Head from 'next/head';
 
